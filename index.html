@@ -133,7 +133,22 @@ input[type=checkbox]{width:auto;margin:3px 0 0}
 
 <script>
 const $=id=>document.getElementById(id);
-let reviews=[], db=null, current=null, pendingNew=false;
+const SB_URL='https://gqfcximawhbgxwowlesj.supabase.co';
+const SB_KEY='sb_publishable_9FaN8KXoeI-dciN8ObX06Q_BV0MCgTJ';
+const configured=!SB_URL.includes('VOTRE-PROJET')&&!SB_KEY.includes('VOTRE_CLE');
+const SBH={apikey:SB_KEY,'Content-Type':'application/json'};
+if(SB_KEY.startsWith('eyJ'))SBH.Authorization='Bearer '+SB_KEY;
+async function sb(path,opt){
+  const o=opt||{};
+  const r=await fetch(SB_URL+'/rest/v1/'+path,{method:o.method||'GET',headers:{...SBH,...(o.headers||{})},body:o.body});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  return r.status===204?null:r.json().catch(()=>null);
+}
+async function load(){
+  const rows=await sb('reviews?select=*&order=created_at.desc&limit=1000');
+  reviews=(rows||[]).map(d=>({id:d.id,company:d.company,coKey:d.co_key,role:d.role,status:d.status,rate:d.rate,sal:d.sal,wlb:d.wlb,title:d.title,pro:d.pro,con:d.con,ts:Date.parse(d.created_at)}));
+}
+let reviews=[], current=null, pendingNew=false;
 
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML}
 function stars(n){n=Math.round(n);return '★'.repeat(n)+'☆'.repeat(5-n)}
@@ -218,7 +233,10 @@ async function send(){
   const r={consent:true,company,coKey:norm(company),role:$('fRole').value.trim(),status:$('fSt').value,
     rate:+$('fRate').value,sal:+$('fSal').value,wlb:+$('fWlb').value,title:$('fTitle').value.trim(),pro:$('fPro').value.trim(),con:$('fCon').value.trim(),ts:Date.now()};
   try{
-    if(db){await db.collection('reviews').add(r)}else{reviews.push(r)}
+    if(configured){
+      await sb('reviews',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify({company:r.company,co_key:r.coKey,role:r.role,status:r.status,rate:r.rate,sal:r.sal,wlb:r.wlb,title:r.title,pro:r.pro,con:r.con,consent:true})});
+      await load();
+    }else{reviews.push(r)}
     note(''); renderList(); openCo(norm(company));
   }catch(e){
     note(e&&e.code==='invalid_argument'?'Vous n\'avez pas l\'autorisation de publier ici.':'Publication impossible, réessayez.');
@@ -244,7 +262,7 @@ $('coRev').addEventListener('click',e=>{
   const go=document.createElement('button');go.type='button';go.textContent='Envoyer le signalement';go.disabled=true;
   sel.onchange=()=>{go.disabled=!sel.value};
   go.onclick=async()=>{
-    try{if(!db)throw 0;await db.collection('reports').add({reviewId:id,company:current,reason:sel.value,ts:Date.now()});w.textContent='Merci, votre signalement a été enregistré.'}
+    try{if(!configured)throw 0;await sb('reports',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify({review_id:id,reason:sel.value})});w.textContent='Merci, votre signalement a été enregistré.'}
     catch(x){w.textContent='Signalement impossible pour le moment.'}
   };
   w.append(sel,go);
@@ -253,14 +271,8 @@ $('bSend').onclick=send;
 renderList();
 
 (async()=>{
-  try{
-    db=await claude.use('db');
-    if(!db){note('Mode démo : les avis ne sont pas enregistrés durablement.');return}
-    db.collection('reviews').onSnapshot(s=>{
-      reviews=s.docs.map(d=>({...d.data(),id:d.id}));
-      renderList(); if(!$('vCo').classList.contains('hid')&&current)openCo(current);
-    },()=>note('Lecture des avis impossible pour le moment.'));
-  }catch(e){note('Mode démo : les avis ne sont pas enregistrés durablement.')}
+  if(!configured){note('Mode démo : les avis ne sont pas enregistrés durablement.');return}
+  try{await load();renderList()}catch(e){note('Lecture des avis impossible pour le moment.')}
 })();
 </script>
 </body>
